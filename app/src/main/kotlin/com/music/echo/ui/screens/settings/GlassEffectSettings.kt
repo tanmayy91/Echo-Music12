@@ -109,9 +109,14 @@ fun GlassEffectSettings(
         LiquidGlassSurfaceOpacityKey, defaultValue = 0.4f
     )
     val (textColorInt, onTextColorChange) = rememberPreference(
-        LiquidGlassTextColorKey, defaultValue = Color.White.toArgb()
+        LiquidGlassTextColorKey, defaultValue = 0
     )
-    val textColor = remember(textColorInt) { Color(textColorInt) }
+    val adaptiveTextColor = if (MaterialTheme.colorScheme.surface.luminance() > 0.5f) {
+        Color.Black
+    } else {
+        Color.White
+    }
+    val textColor = if (textColorInt == 0) adaptiveTextColor else Color(textColorInt)
     val (playerEnabled, onPlayerEnabledChange) = rememberPreference(
         LiquidGlassPlayerEnabledKey, defaultValue = true
     )
@@ -235,16 +240,19 @@ fun GlassEffectSettings(
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.tune),
                     title = { Text(stringResource(R.string.liquid_glass_lens_height)) },
+                    description = { Text(stringResource(R.string.liquid_glass_lens_height_desc)) },
                     onClick = { showLensHeightDialog = true }
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.tune),
                     title = { Text(stringResource(R.string.liquid_glass_lens_amount)) },
+                    description = { Text(stringResource(R.string.liquid_glass_lens_amount_desc)) },
                     onClick = { showLensAmountDialog = true }
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.tune),
                     title = { Text(stringResource(R.string.liquid_glass_chromatic_aberration)) },
+                    description = { Text(stringResource(R.string.liquid_glass_chromatic_aberration_desc)) },
                     trailingContent = {
                         Switch(
                             checked = chromaticAberration,
@@ -265,6 +273,7 @@ fun GlassEffectSettings(
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.tune),
                     title = { Text(stringResource(R.string.liquid_glass_depth_effect)) },
+                    description = { Text(stringResource(R.string.liquid_glass_depth_effect_desc)) },
                     trailingContent = {
                         Switch(
                             checked = depthEffect,
@@ -319,6 +328,7 @@ fun GlassEffectSettings(
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.music_note),
                     title = { Text(stringResource(R.string.liquid_glass_player)) },
+                    description = { Text(stringResource(R.string.liquid_glass_player_desc)) },
                     trailingContent = {
                         Switch(
                             checked = playerEnabled,
@@ -339,6 +349,7 @@ fun GlassEffectSettings(
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.music_note),
                     title = { Text(stringResource(R.string.liquid_glass_mini_player)) },
+                    description = { Text(stringResource(R.string.liquid_glass_mini_player_desc)) },
                     trailingContent = {
                         Switch(
                             checked = miniPlayerEnabled,
@@ -359,6 +370,7 @@ fun GlassEffectSettings(
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.nav_bar),
                     title = { Text(stringResource(R.string.liquid_glass_nav_bar)) },
+                    description = { Text(stringResource(R.string.liquid_glass_nav_bar_desc)) },
                     trailingContent = {
                         Switch(
                             checked = navBarEnabled,
@@ -508,7 +520,10 @@ fun GlassEffectSettings(
                 onTextColorChange(color.toArgb())
                 showTextColorDialog = false
             },
-            defaultColor = Color.White,
+            onReset = {
+                onTextColorChange(0)
+                showTextColorDialog = false
+            },
         )
     }
 

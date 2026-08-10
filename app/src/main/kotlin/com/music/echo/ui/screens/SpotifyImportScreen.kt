@@ -197,6 +197,7 @@ private fun spotifyImportItems(
         ),
         Material3SettingsItem(
             title = { Text(stringResource(R.string.action_logout)) },
+            description = { Text(stringResource(R.string.action_logout_desc)) },
             icon = painterResource(R.drawable.logout),
             enabled = idle,
             onClick = { viewModel.logout() },
@@ -354,6 +355,7 @@ private fun SpotifyLoginSheet(
                         settings.setSupportZoom(true)
                         settings.builtInZoomControls = true
                         settings.displayZoomControls = false
+                        settings.userAgentString = SpotifyAuth.USER_AGENT
                         webViewClient = object : WebViewClient() {
                             private fun captureCookies(url: String?): Boolean {
                                 if (captured) return true

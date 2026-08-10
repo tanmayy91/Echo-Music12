@@ -119,113 +119,17 @@ object YTPlayerUtils {
         knownDurationMs: Long? = null,
         isDownload: Boolean = false
     ): Result<PlaybackData> {
-        val showFallbackToast = context?.let { 
-            it.dataStore.data.first()[iad1tya.echo.music.constants.ShowAudioFallbackToastKey] 
-        } ?: true
-
-        var hasShownLosslessToast = false
-        var hasShownOpusToast = false
-
-        suspend fun tryOpus(): Result<PlaybackData> {
-            val firstAttempt = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
-            if (firstAttempt.isFailure && YouTube.cookie == null) {
-                Timber.tag(TAG).w("Playback failed for guest. Rotating session and retrying...")
-                PlaybackLogManager.log(PlaybackLogLevel.BOT, "Playback failed for guest", "Triggering bot detection mitigation (rotating guest session)")
-                BotDetectionMitigator.rotateGuestSession()
-                val retryResult = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
-                retryResult.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
-                return retryResult
-            }
-            firstAttempt.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
-            return firstAttempt
+        val firstAttempt = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager, context, knownArtist, knownTitle)
+        if (firstAttempt.isFailure && YouTube.cookie == null) {
+            Timber.tag(TAG).w("Playback failed for guest. Rotating session and retrying...")
+            PlaybackLogManager.log(PlaybackLogLevel.BOT, "Playback failed for guest", "Triggering bot detection mitigation (rotating guest session)")
+            BotDetectionMitigator.rotateGuestSession()
+            val retryResult = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager, context, knownArtist, knownTitle)
+            retryResult.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
+            return retryResult
         }
-
-        suspend fun tryLossless(): Result<PlaybackData> {
-            var attemptResult: Result<PlaybackData>? = null
-            var lastException: Exception? = null
-            try {
-                attemptResult = kotlinx.coroutines.withTimeoutOrNull(15000L) {
-                    val metadata = if (knownTitle == null || knownArtist == null) playerResponseForMetadata(videoId).getOrNull() else null
-                    val title = knownTitle ?: metadata?.videoDetails?.title
-                    val author = knownArtist ?: metadata?.videoDetails?.author?.replace(" - Topic", "")
-                    if (title != null && author != null) {
-                        val track = iad1tya.echo.music.utils.LosslessAPI.search(title, author)
-                        if (track != null) {
-                            val format = com.music.innertube.models.response.PlayerResponse.StreamingData.Format(
-                                itag = 0,
-                                mimeType = "audio/flac; codecs=\"flac\"",
-                                bitrate = 1411000,
-                                audioSampleRate = 44100,
-                                contentLength = 0L,
-                                url = track.url,
-                                cipher = null,
-                                signatureCipher = null,
-                                audioQuality = "LOSSLESS",
-                                fps = null,
-                                width = null,
-                                height = null,
-                                quality = "lossless",
-                                qualityLabel = null,
-                                averageBitrate = null,
-                                approxDurationMs = null,
-                                audioChannels = null,
-                                loudnessDb = null,
-                                lastModified = null,
-                                audioTrack = null
-                            )
-                            val resolvedPlaybackData = PlaybackData(
-                                audioConfig = null,
-                                videoDetails = metadata?.videoDetails,
-                                playbackTracking = null,
-                                format = format,
-                                streamUrl = track.url,
-                                streamExpiresInSeconds = 3600
-                            )
-                            return@withTimeoutOrNull Result.success(resolvedPlaybackData)
-                        } else {
-                            throw Exception("No streamable match resolved on Lossless index")
-                        }
-                    } else {
-                        throw Exception("Missing title or artist for lookup")
-                    }
-                }
-                if (attemptResult == null) {
-                    lastException = Exception("Timeout fetching Lossless stream")
-                }
-            } catch (e: Exception) {
-                lastException = e
-            }
-            
-            return attemptResult ?: Result.failure(lastException ?: Exception("Lossless resolution failed"))
-        }
-
-        fun showToastMsg(msg: String) {
-            context?.let {
-                if (showFallbackToast) {
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        android.widget.Toast.makeText(it, msg, android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-        }
-
-        return when (audioQuality) {
-            AudioQuality.LOSSLESS -> {
-                val losslessRes = tryLossless()
-                if (losslessRes.isSuccess) return losslessRes
-
-                Timber.tag(TAG).e("Qobuz resolution failed, falling back to YouTube Opus")
-                if (!hasShownLosslessToast) {
-                    hasShownLosslessToast = true
-                    showToastMsg(if (isDownload) "Lossless download unavailable, falling back to Opus" else "Lossless stream unavailable, falling back to Opus")
-                }
-
-                tryOpus()
-            }
-            else -> {
-                tryOpus()
-            }
-        }
+        firstAttempt.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
+        return firstAttempt
     }
 
     private suspend fun resolvePlaybackData(
@@ -233,6 +137,9 @@ object YTPlayerUtils {
         playlistId: String? = null,
         audioQuality: AudioQuality,
         connectivityManager: ConnectivityManager,
+        context: android.content.Context? = null,
+        knownArtist: String? = null,
+        knownTitle: String? = null
     ): Result<PlaybackData> = runCatching {
         Timber.tag(logTag).d("Fetching player response for videoId: $videoId, playlistId: $playlistId")
         PlaybackLogManager.log(PlaybackLogLevel.INFO, "Resolving playback data", "Video: $videoId")
@@ -308,7 +215,7 @@ object YTPlayerUtils {
             "AGE_CHECK_REQUIRED",
             "AGE_VERIFICATION_REQUIRED",
             "CONTENT_CHECK_REQUIRED"
-        )
+        ) || (mainStatus == "LOGIN_REQUIRED" && mainPlayerResponse.playabilityStatus.reason?.contains("age", ignoreCase = true) == true)
         wasOriginallyAgeRestricted = isAgeRestrictedFromResponse
 
         if (isAgeRestrictedFromResponse && isLoggedIn) {
@@ -349,14 +256,15 @@ object YTPlayerUtils {
         var isAgeRestricted = currentStatus in listOf(
             "AGE_CHECK_REQUIRED",
             "AGE_VERIFICATION_REQUIRED",
-            "CONTENT_CHECK_REQUIRED"
+            "CONTENT_CHECK_REQUIRED",
+            "UNPLAYABLE",
+            "LOGIN_REQUIRED"
         )
 
         if (isAgeRestricted) {
-            Timber.tag(logTag).d("Content is still age-restricted (status: $currentStatus), will try fallback clients")
-            Log.i(TAG, "Age-restricted content detected: videoId=$videoId, status=$currentStatus")
+            Timber.tag(logTag).d("Content needs fallback (status: $currentStatus)")
+            android.util.Log.i("YTPlayerUtils", "Unplayable content detected: videoId=$videoId, status=$currentStatus")
         }
-
         
         val isPrivateTrack = mainPlayerResponse.videoDetails?.musicVideoType == "MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK"
 
@@ -619,7 +527,7 @@ object YTPlayerUtils {
             ?.filter { it.isAudio && it.isOriginal }
             ?.maxByOrNull {
                 it.bitrate * when (audioQuality) {
-                    AudioQuality.OPUS, AudioQuality.LOSSLESS -> 1
+                    AudioQuality.OPUS -> 1
                 } + (if (it.mimeType.startsWith("audio/webm")) 10240 else 0) 
             }
 

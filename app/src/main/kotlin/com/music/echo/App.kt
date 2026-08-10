@@ -71,8 +71,27 @@ class App : Application(), SingletonImageLoader.Factory {
         }
     }
 
+    private fun isCrashProcess(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            return Application.getProcessName() == "$packageName:crash"
+        }
+        val pid = android.os.Process.myPid()
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        for (processInfo in manager.runningAppProcesses ?: emptyList()) {
+            if (processInfo.pid == pid) {
+                return processInfo.processName == "$packageName:crash"
+            }
+        }
+        return false
+    }
+
     override fun onCreate() {
         super.onCreate()
+
+        if (isCrashProcess()) {
+            CrashHandler.install(this)
+            return
+        }
 
         // Removed destructive database deletion to preserve user data
 
@@ -152,7 +171,7 @@ class App : Application(), SingletonImageLoader.Factory {
         }
 
         YouTube.useLoginForBrowse = settings[UseLoginForBrowse] ?: true
-        YouTube.ipVersion = settings[IpVersionKey]?.toEnum(defaultValue = IpVersion.IPV4) ?: IpVersion.IPV4
+        YouTube.ipVersion = settings[IpVersionKey]?.toEnum(defaultValue = IpVersion.AUTO) ?: IpVersion.AUTO
 
         val channel = NotificationChannel(
             "updates",
@@ -243,7 +262,7 @@ class App : Application(), SingletonImageLoader.Factory {
                 .map { it[IpVersionKey] }
                 .distinctUntilChanged()
                 .collect { ipVersion ->
-                    YouTube.ipVersion = ipVersion?.toEnum(defaultValue = IpVersion.IPV4) ?: IpVersion.IPV4
+                    YouTube.ipVersion = ipVersion?.toEnum(defaultValue = IpVersion.AUTO) ?: IpVersion.AUTO
                 }
         }
     }

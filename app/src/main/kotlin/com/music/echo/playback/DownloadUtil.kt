@@ -66,7 +66,7 @@ constructor(
 ) {
     private val connectivityManager = context.getSystemService<ConnectivityManager>()!!
     private val downloadQuality by enumPreference(context, iad1tya.echo.music.constants.DownloadQualityKey, iad1tya.echo.music.constants.DownloadQuality.YOUTUBE)
-    private val ipVersion by enumPreference(context, IpVersionKey, IpVersion.IPV4)
+    private val ipVersion by enumPreference(context, IpVersionKey, IpVersion.AUTO)
     private val songUrlCache = HashMap<String, Pair<String, Long>>()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -75,28 +75,30 @@ constructor(
 
     private val dataSourceFactory =
         ResolvingDataSource.Factory(
-            OkHttpDataSource.Factory(
-                        OkHttpClient.Builder()
-                            .dns(object : Dns {
-                                override fun lookup(hostname: String): List<InetAddress> {
-                                    val addresses = Dns.SYSTEM.lookup(hostname)
-                                    return when (this@DownloadUtil.ipVersion) {
-                                        IpVersion.IPV4 -> addresses.filter { it is Inet4Address }.ifEmpty { addresses }
-                                        IpVersion.IPV6 -> addresses.filter { it is Inet6Address }.ifEmpty { addresses }
-                                        IpVersion.AUTO -> addresses
-                                    }
+            ChunkingDataSourceFactory(
+                OkHttpDataSource.Factory(
+                    OkHttpClient.Builder()
+                        .dns(object : Dns {
+                            override fun lookup(hostname: String): List<InetAddress> {
+                                val addresses = Dns.SYSTEM.lookup(hostname)
+                                return when (this@DownloadUtil.ipVersion) {
+                                    IpVersion.IPV4 -> addresses.filter { it is Inet4Address }.ifEmpty { addresses }
+                                    IpVersion.IPV6 -> addresses.filter { it is Inet6Address }.ifEmpty { addresses }
+                                    IpVersion.AUTO -> addresses
                                 }
-                            })
-                            .proxy(YouTube.proxy)
-                            .proxyAuthenticator { _, response ->
-                                YouTube.proxyAuth?.let { auth ->
-                                    response.request.newBuilder()
-                                        .header("Proxy-Authorization", auth)
-                                        .build()
-                                } ?: response.request
                             }
-                            .build(),
-                    ),
+                        })
+                        .proxy(YouTube.proxy)
+                        .proxyAuthenticator { _, response ->
+                            YouTube.proxyAuth?.let { auth ->
+                                response.request.newBuilder()
+                                    .header("Proxy-Authorization", auth)
+                                    .build()
+                            } ?: response.request
+                        }
+                        .build(),
+                )
+            )
         ) { dataSpec ->
             val mediaId = dataSpec.key ?: error("No media id")
 
@@ -107,10 +109,7 @@ constructor(
             val playbackData = runBlocking(Dispatchers.IO) {
                 YTPlayerUtils.playerResponseForPlayback(
                     mediaId,
-                    audioQuality = when (downloadQuality) {
-                        iad1tya.echo.music.constants.DownloadQuality.LOSSLESS -> AudioQuality.LOSSLESS
-                        else -> AudioQuality.OPUS
-                    },
+                    audioQuality = AudioQuality.OPUS,
                     connectivityManager = connectivityManager,
                     context = context,
                     isDownload = true
@@ -124,7 +123,7 @@ constructor(
                         id = mediaId,
                         itag = format.itag,
                         mimeType = format.mimeType.split(";")[0],
-                        codecs = format.mimeType.split("codecs=")[1].removeSurrounding("\""),
+                        codecs = format.mimeType.split("codecs=").getOrNull(1)?.removeSurrounding("\"") ?: "opus",
                         bitrate = format.bitrate,
                         sampleRate = format.audioSampleRate,
                         contentLength = format.contentLength ?: 0L,
